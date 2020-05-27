@@ -1,0 +1,16 @@
+[
+{
+  "modid": "edudodatki",
+  "name": "Edukacja 3.0 - Dodatki",
+  "description": "Made by EVBlue",
+  "version": "1.0",
+  "mcversion": "1.12.2",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ["EVBlue"],
+  "credits": "The Forge and FML guys, for making this example",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": []
+}
+]

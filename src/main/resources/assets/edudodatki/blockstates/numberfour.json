@@ -1,0 +1,9 @@
+{
+    "variants": {
+        "normal": { "model": "edudodatki:numberfour"},
+        "facing=north": { "model": "edudodatki:numberfour", "y": 180 },
+        "facing=east":  { "model": "edudodatki:numberfour", "y": 270 },
+        "facing=south": { "model": "edudodatki:numberfour" },
+        "facing=west":  { "model": "edudodatki:numberfour", "y": 90 }
+    }
+}

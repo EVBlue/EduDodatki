@@ -1,0 +1,338 @@
+package com.evblue.edukacja.util;
+
+import com.evblue.edukacja.Main;
+import com.evblue.edukacja.data.*;
+
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class MenuParser {
+	
+	public static MenuParser instance = new MenuParser();
+	private final String FILE_HEADER = "menu_file_begin";
+	private final String CLIENT_MENUS_LOCATION = "config/EduDodatki/menu/downloaded";
+	private final String SERVER_MENUS_LOCATION = "config/EduDodatki/menu/defined";
+	private final String LOCAL_LOCATION = "assets/edukacja/menu";
+	String CURRENT_MENU = null;
+	private boolean GLOBAL_FAILURE;
+	
+	public void parseMenu(String menu, boolean remote) {
+		long millis = System.currentTimeMillis();
+		Main.logger_parser.info("Parsing menu " + menu + "...");
+		Main.dynStorage.menus.clear();
+		
+		InputStream is = null;
+		BufferedReader reader = null;
+		try {
+			if (!remote) {
+				is = getClass().getClassLoader().getResourceAsStream(LOCAL_LOCATION + menu);
+			}
+			else {
+				is = new FileInputStream(new File(CLIENT_MENUS_LOCATION, menu));
+			}
+			
+			if (is == null) {
+				Main.logger_parser.error(menu + " is not exist! Kill yourself!");
+				return;
+			}
+			reader = new BufferedReader(new InputStreamReader(is, "UTF8"));
+			read(reader, menu);
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			if (is != null) try {
+				is.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			if (reader != null) try {
+				reader.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		Main.logger_parser.info("Menu parsing finished " + (GLOBAL_FAILURE ? " with critical error" : "") + ", took " + (float)(System.currentTimeMillis() - millis) / 1000F + " s.");
+	}
+	
+	public String getMenuHash(String s, boolean server) {
+		File f = new File(server ? SERVER_MENUS_LOCATION : CLIENT_MENUS_LOCATION, s);
+		if (!f.exists()) return "miss";
+		return FileProcessor.getHash(f);
+	}
+	
+	public boolean bytesToClientMenu(byte[] bytes, String s) {
+		File f = new File(CLIENT_MENUS_LOCATION, s);
+		OutputStream is = null;
+		try {
+			is = new FileOutputStream(f);
+			is.write(bytes);
+			return true;
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			if (is != null) try {
+				is.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		return false;
+	}
+	
+	public byte[] serverMenuToBytes(String s) {
+		File f = new File(SERVER_MENUS_LOCATION, s);
+		InputStream is = null;
+		byte[] bytes = null;
+		try {
+			is = new FileInputStream(f);
+			bytes = new byte[(int) f.length()];
+			is.read(bytes);
+			is.close();
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			if (is != null) try {
+				is.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		return bytes;
+	}
+	
+	public boolean checkAndParseCustom() {
+		new File(CLIENT_MENUS_LOCATION).mkdirs();
+		new File(SERVER_MENUS_LOCATION).mkdirs();
+		File f = new File(CLIENT_MENUS_LOCATION, "custom.menu");
+		if (f.exists()) {
+			Main.logger_parser.info("Found custom menu file, parsing it.");
+			MenuParser.instance.parseMenu("custom.menu", true);
+			return true;
+		}
+		return false;
+	}
+	
+	private void read(BufferedReader reader, String menu) {
+		try {
+			String line;
+			boolean startReached = false;
+			
+			int lineNumber = 0;
+			
+			while((line = reader.readLine()) != null && !GLOBAL_FAILURE) {
+				lineNumber++;
+				line = line.trim();
+				if (!line.isEmpty() && !line.startsWith("#") && !line.startsWith("//")) {
+					if (line.contentEquals(FILE_HEADER)) {
+						Main.logger_parser.info("File " + menu + " looks like a valid menu file, processing...");
+						startReached = true;
+					}
+					else if (startReached) {
+						if (!this.parseLine(menu, line)) {
+							Main.logger_parser.warn("Skipping line " + lineNumber + " of menu " + menu + ".");
+						}
+					}
+				}
+			}
+			if (!startReached) Main.logger_parser.error("File " + menu + " does not contains header word!");
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public boolean parseLine(String menu, String line) {
+		if (!line.contains(" "))
+			return false;
+		
+		if (!(line.startsWith("end") || line.startsWith("begin") || line.startsWith("add") || line.startsWith("include")))
+			return false;
+		
+		Matcher m = Pattern.compile("([^\"]\\S*|\".+?\")\\s*").matcher(line);
+		List<String> slist = new ArrayList<String>();
+		while (m.find())
+			slist.add(m.group(1).replace("\"", ""));
+		
+		if (line.startsWith("begin")) {
+			if (CURRENT_MENU != null) {
+				Main.logger_parser.error("Parser failure while parsing " + menu + "! Another begin tag found while parsing" + CURRENT_MENU + " aborting!");
+				fail();
+			}
+			String s = getTagValue("begin", slist);
+			if (isStringValid(s)) CURRENT_MENU = s;
+			
+		}
+		else if (line.startsWith("end")) {
+			if (CURRENT_MENU != null) {
+				Main.logger_parser.error("Parser failure while parsing " + menu + "! end tag found, but begin is not!");
+				fail();
+			}
+			else {
+				String s = getTagValue("end", slist);
+				if (!(isStringValid(s) && CURRENT_MENU.equals(s))) {
+					Main.logger_parser.error("Parser failure while parsing " + menu + "! end tag found, but it is not same as begin tag!");
+					fail();
+				}
+				else {
+					CURRENT_MENU = null;
+				}
+			}	
+		}
+		else if(CURRENT_MENU != null) {
+			ItemListNode node;
+			
+			if (line.startsWith("include")) {
+				String include = getTagValue("include", slist);
+				RequestEnum inc = RequestEnum.parseElement(include);
+				if (!isStringValid(include)) {
+					Main.logger_parser.error("Can't include nothing.");
+					return false;
+				}
+				else if (inc == null || !inc.isInclude()) {
+					Main.logger_parser.error("Can't include " + include + ", WTF is that?");
+					return false;
+				}
+				node = ItemListNode.include(inc);
+			}
+			else {
+				String as = getTagValue("as", slist);
+				String name = getTagValue("add", slist);
+				
+				if (name.equals("SEPARATOR")) {
+					node = ItemListNode.separator();
+				}
+				else if (!isStringValid(as)) {
+					Main.logger_parser.error("Line withour action, this is UNACCEPTABLE!");
+					return false;
+				}
+				else if (as.contentEquals("PAGE") || as.contentEquals("LINK")) {
+					String to = getTagValue("to", slist);
+					
+					if (!isStringValid(to)) {
+						Main.logger_parser.error("Page element without page link!");
+						return false;
+					}
+					
+					node = ItemListNode.create(name);
+					node.setColor(getTagHEXInt("color", slist));
+					if (as.equals("LINK")) {
+						node.setType(ActionsEnum.LINK);
+					}
+					else {
+						node.setType(ActionsEnum.PAGE);
+					}
+					
+					node.setCommandData(to);
+				}
+				else if (as.equals("CMD_EXEC")) {
+					String cmd = getTagValue("cmd", slist);
+					if (!isStringValid(cmd)) {
+						Main.logger_parser.error("Command executor without comman? Why?");
+						return false;
+					}
+					node = ItemListNode.create(name);
+					node.setColor(getTagHEXInt("color", slist));
+					node.setActiveColor(getTagHEXInt("activeColor", slist));
+					ListensEnum listen = ListensEnum.parseElement(getTagValue("listens", slist));
+					if (listen != null) {
+						if (listen == ListensEnum.PROP) {
+							Main.logger_parser.warn("Command can't listen prop!");
+						}
+						else node.setListens(listen);
+					}
+					node.setType(ActionsEnum.CMD_EXEC);
+					node.setCommandData(cmd);
+				}
+				else {
+					ActionsEnum role = ActionsEnum.parseElement(as);
+					if (role == null) {
+						Main.logger_parser.error(as + " is not vaild action, skipping.");
+						return false;
+					}
+					node = role == ActionsEnum.TITLE ? ItemListNode.title(name) : ItemListNode.create(name);
+					node.setColor(getTagHEXInt("color", slist));
+					node.setActiveColor(getTagHEXInt("activeColor", slist));
+					ListensEnum listen = ListensEnum.parseElement(getTagValue("listens", slist));
+					if (listen != null) {
+						if (!role.canListen() && listen == ListensEnum.PROP) {
+							Main.logger_parser.warn(role + "doesn't have prop to listen!");
+						}
+						else node.setListens(listen);
+					}
+					node.setType(role);
+				}
+			}
+			
+			Main.dynStorage.menus.add(MenuElement.create(CURRENT_MENU, node));
+		}
+		else {
+			Main.logger_parser.error(menu + " syntax error!" + line + " must be between begin and end tags! Skipping..");
+		}
+		return true;
+		
+	}
+	
+	private void fail() {
+		GLOBAL_FAILURE = true;
+		Main.dynStorage.menus.clear();		
+	}
+	
+	private boolean isStringValid(String s) {
+		return s != null && !s.trim().equals("");
+	}
+	
+	private int parsePositiveInt(String s) {
+		int i = 0;
+		if (s == null) return i;
+		try {
+			i = Integer.parseInt(s);
+		} catch (NumberFormatException ignored) {
+		}
+		return i < 0 ? 0 : i;
+	}
+	
+	private int parsePositiveHEXInt(String s) {
+		int i = 0xFFFFFF;
+		if (s == null) return i;
+		try {
+			i = Integer.parseInt(s.replaceAll("#", ""), 16);
+		} catch (NumberFormatException ignored) {
+		}
+		return i < 0 ? 0xFFFFFF : i;
+	}
+	
+	private String getTagValue(String tag, List<String> tagList) {
+		if (tagList.contains(tag)) {
+			int tagIndex = tagList.indexOf(tag);
+			if (this.isIndexInList(tagIndex + 1, tagList)) return tagList.get(tagIndex + 1);
+		}
+		return null;
+	}
+	
+	private boolean hasTag(String tag, List<String> tagList) {
+		return tagList.contains(tag);
+	}
+	
+	private int getTagInt(String tag, List<String> tagList) {
+		String val = this.getTagValue(tag, tagList);
+		if (tag != null) return this.parsePositiveInt(val);
+		return 0;
+	}
+	
+	private int getTagHEXInt(String tag, List<String> tagList) {
+		String val = this.getTagValue(tag, tagList);
+		if (tag != null) return this.parsePositiveHEXInt(val);
+		return 0;
+	}
+	
+	private boolean isIndexInList(int index, List list) {
+		return index > 0 && index < list.size();
+	}
+	
+}

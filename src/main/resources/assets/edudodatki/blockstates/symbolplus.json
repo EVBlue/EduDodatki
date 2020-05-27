@@ -1,0 +1,9 @@
+{
+    "variants": {
+        "normal": { "model": "edudodatki:symbolplus"},
+        "facing=north": { "model": "edudodatki:symbolplus", "y": 180 },
+        "facing=east":  { "model": "edudodatki:symbolplus", "y": 270 },
+        "facing=south": { "model": "edudodatki:symbolplus" },
+        "facing=west":  { "model": "edudodatki:symbolplus", "y": 90 }
+    }
+}

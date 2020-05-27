@@ -1,0 +1,9 @@
+//Items
+item.elogo.name=Edukacja 3.0 Logo Transparentne
+item.obsidian_ingot.name=Obsidian Ingot
+
+//Blocks
+tile.ruby_block.name=Block of Ruby
+
+//Another
+itemGroup.edudodatki=Edukacja 3.0 - Dodatki
